@@ -837,7 +837,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes",
+          "expr": "(100 * (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / (node_memory_SwapTotal_bytes > 0)) or vector(0)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",

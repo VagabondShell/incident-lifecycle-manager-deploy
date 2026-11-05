@@ -150,7 +150,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "pg_stat_database_numbackends{datname=\"incident_db\"}",
+                        "expr": "pg_stat_database_numbackends{datname!~\"template.*|postgres\"}",
                         "legendFormat": "__auto",
                         "range": true
                       },
@@ -232,7 +232,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "pg_stat_database_numbackends{datname=\"incident_db\"} /  scalar(pg_settings_max_connections{job=\"postgres\"})",
+                        "expr": "pg_stat_database_numbackends{datname!~\"template.*|postgres\"} /  scalar(pg_settings_max_connections{job=\"postgres\"})",
                         "legendFormat": "__auto",
                         "range": true
                       },
@@ -324,7 +324,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "rate(pg_stat_database_xact_commit{datname=\"incident_db\"}[5m])",
+                        "expr": "rate(pg_stat_database_xact_commit{datname!~\"template.*|postgres\"}[5m])",
                         "legendFormat": "{{Commits/sec}}",
                         "range": true
                       },
@@ -345,7 +345,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "rate(pg_stat_database_xact_rollback{datname=\"incident_db\"}[5m])",
+                        "expr": "rate(pg_stat_database_xact_rollback{datname!~\"template.*|postgres\"}[5m])",
                         "instant": false,
                         "legendFormat": "{{Rollbacks/sec}}",
                         "range": true
@@ -465,7 +465,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "pg_database_size_bytes{datname=\"incident_db\"}",
+                        "expr": "pg_database_size_bytes{datname!~\"template.*|postgres\"}",
                         "legendFormat": "__auto",
                         "range": true
                       },
@@ -580,7 +580,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum(pg_locks_count{datname=\"incident_db\"})",
+                        "expr": "sum(pg_locks_count{datname!~\"template.*|postgres\"})",
                         "legendFormat": "__auto",
                         "range": true
                       },
