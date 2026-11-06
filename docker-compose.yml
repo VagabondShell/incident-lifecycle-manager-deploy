@@ -6,8 +6,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
@@ -19,7 +17,8 @@ services:
       retries: 20
 
   postgres-backup:
-    image: ${DOCKER_USERNAME}/incident-postgres-backup:${IMAGE_TAG}
+    image: ${DOCKER_USERNAME}/incident-postgres-backup:${BACKUP_VERSION:-not-configured}
+    profiles: ["extras"]
     container_name: incident_postgres_backup
     restart: always
     environment:
@@ -32,10 +31,12 @@ services:
     networks:
       - incident_network
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   vault:
-    image: ${DOCKER_USERNAME}/incident-vault:${IMAGE_TAG}
+    image: ${DOCKER_USERNAME}/incident-vault:${VAULT_VERSION:-not-configured}
+    profiles: ["extras"]
     container_name: incident_vault
     ports:
       - "8200:8200"
@@ -59,8 +60,6 @@ services:
       - prometheus_data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    ports:
-      - "9090:9090"
     networks:
       - incident_network
 
@@ -96,16 +95,12 @@ services:
       timeout: 5s
       retries: 10
       start_period: 300s
-    ports:
-      - "3000:3000"
     networks:
       - incident_network
 
   frontend:
     image: ${DOCKER_USERNAME}/incident-frontend:${IMAGE_TAG}
     container_name: incident_frontend
-    ports:
-      - "4173:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -119,23 +114,29 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-    ports:
-      - "3001:3000"
+      GF_SERVER_ROOT_URL: "https://webexp.me/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "false"
+      GF_SERVER_PROTOCOL: "http"
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:?Set DISCORD_WEBHOOK_URL}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - ./infra/waf/grafana-exclusion.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
     networks:
       - incident_network
 
   waf:
-    image: ${DOCKER_USERNAME}/incident-waf:${IMAGE_TAG}
+    image: ${DOCKER_USERNAME}/incident-waf:${WAF_VERSION}
     container_name: incident_waf
     environment:
       ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/incident-waf/certs:/etc/nginx/tls:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       frontend:
         condition: service_started
@@ -162,6 +163,7 @@ services:
     restart: unless-stopped
     networks:
       - incident_network
+
   node_exporter:
     image: prom/node-exporter:v1.12.1
     container_name: node_exporter
