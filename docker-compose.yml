@@ -122,7 +122,6 @@ services:
       - grafana-data:/var/lib/grafana
       - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
-      - ./infra/waf/grafana-exclusion.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
     networks:
       - incident_network
 
@@ -137,6 +136,7 @@ services:
     volumes:
       - /etc/incident-waf/certs:/etc/nginx/tls:ro
       - /var/www/certbot:/var/www/certbot:ro
+      - ./infra/waf/grafana-exclusion.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
     depends_on:
       frontend:
         condition: service_started
