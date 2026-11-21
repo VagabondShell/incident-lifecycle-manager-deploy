@@ -1,32 +1,35 @@
 services:
   postgres:
-    image: postgres:18
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-postgres:${IMAGE_TAG:?Set IMAGE_TAG}
     container_name: incident_postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN_FILE: /vault/token/token
     volumes:
+      - vault_tok_postgres:/vault/token:ro
       - postgres_data:/var/lib/postgresql
     networks:
       - incident_network
+    depends_on:
+      vault:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1"]
       interval: 5s
       timeout: 5s
       retries: 20
 
   postgres-backup:
-    image: ${DOCKER_USERNAME}/incident-postgres-backup:${BACKUP_VERSION:-not-configured}
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-postgres-backup:${IMAGE_TAG:?Set IMAGE_TAG}
     profiles: ["extras"]
     container_name: incident_postgres_backup
     restart: always
     environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN_FILE: /vault/token/token
       POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
+      - vault_tok_backup:/vault/token:ro
       - ./backups:/backups
     networks:
       - incident_network
@@ -35,15 +38,34 @@ services:
         condition: service_healthy
 
   vault:
-    image: ${DOCKER_USERNAME}/incident-vault:${VAULT_VERSION:-not-configured}
-    profiles: ["extras"]
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-vault:${IMAGE_TAG:?Set IMAGE_TAG}
     container_name: incident_vault
-    ports:
-      - "8200:8200"
     cap_add:
       - IPC_LOCK
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      GRAFANA_ADMIN_USER: ${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER}
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET}
     volumes:
-      - vault_token:/vault/runtime
+      - vault_init:/vault/init
+      - vault_data:/vault/data
+      - vault_tok_backend:/vault/tokens/backend
+      - vault_tok_postgres:/vault/tokens/postgres
+      - vault_tok_grafana:/vault/tokens/grafana
+      - vault_tok_exporter:/vault/tokens/exporter
+      - vault_tok_backup:/vault/tokens/backup
+      - vault_tok_migrate:/vault/tokens/migrate
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /vault/init/.ready && vault status -format=json | jq -e '.sealed == false' >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
     networks:
       - incident_network
 
@@ -64,25 +86,24 @@ services:
       - incident_network
 
   backend:
-    image: ${DOCKER_USERNAME}/incident-backend:${IMAGE_TAG}
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-backend:${IMAGE_TAG:?Set IMAGE_TAG}
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN_FILE: /vault/token/token
       NODE_ENV: ${NODE_ENV}
       PORT: ${PORT}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}
       JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL}
       JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
       FRONTEND_URL: ${FRONTEND_URL}
       APP_URL: ${APP_URL}
       TZ: ${TZ}
       IMPORT_MAX_FILE_BYTES: ${IMPORT_MAX_FILE_BYTES:-1048576}
     depends_on:
+      vault:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
@@ -95,11 +116,13 @@ services:
       timeout: 5s
       retries: 10
       start_period: 300s
+    volumes:
+      - vault_tok_backend:/vault/token:ro
     networks:
       - incident_network
 
   frontend:
-    image: ${DOCKER_USERNAME}/incident-frontend:${IMAGE_TAG}
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-frontend:${IMAGE_TAG:?Set IMAGE_TAG}
     container_name: incident_frontend
     depends_on:
       backend:
@@ -108,17 +131,21 @@ services:
       - incident_network
 
   grafana:
-    image: grafana/grafana:13.2.2
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-grafana:${IMAGE_TAG:?Set IMAGE_TAG}
     container_name: grafana
     restart: unless-stopped
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN_FILE: /vault/token/token
       GF_SERVER_ROOT_URL: "https://webexp.me/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "false"
       GF_SERVER_PROTOCOL: "http"
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:?Set DISCORD_WEBHOOK_URL}
+    depends_on:
+      vault:
+        condition: service_healthy
     volumes:
+      - vault_tok_grafana:/vault/token:ro
       - grafana-data:/var/lib/grafana
       - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
@@ -152,15 +179,19 @@ services:
       - incident_network
 
   postgres-exporter:
-    image: quay.io/prometheuscommunity/postgres-exporter
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-postgres-exporter:${IMAGE_TAG:?Set IMAGE_TAG}
     environment:
-      DATA_SOURCE_URI: "postgres:5432/${POSTGRES_DB}?sslmode=disable"
-      DATA_SOURCE_USER: ${POSTGRES_USER}
-      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD}
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN_FILE: /vault/token/token
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_SCRAPE_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - vault_tok_exporter:/vault/token:ro
     networks:
       - incident_network
 
@@ -176,21 +207,33 @@ services:
       - /:/host:ro,rslave
 
   migrate:
-    image: sofianvagabond/incident-migrations:${MIGRATION_VERSION}
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-migrate:${IMAGE_TAG:?Set IMAGE_TAG}
     profiles: ["tools"]
     restart: "no"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN_FILE: /vault/token/token
     depends_on:
+      vault:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+    volumes:
+      - vault_tok_migrate:/vault/token:ro
     networks:
       - incident_network
 
 volumes:
   prometheus_data:
   postgres_data:
-  vault_token:
+  vault_init:
+  vault_data:
+  vault_tok_backend:
+  vault_tok_postgres:
+  vault_tok_grafana:
+  vault_tok_exporter:
+  vault_tok_backup:
+  vault_tok_migrate:
   grafana-data:
 
 networks:
