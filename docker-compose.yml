@@ -153,7 +153,7 @@ services:
       - incident_network
 
   waf:
-    image: ${DOCKER_USERNAME}/incident-waf:${WAF_VERSION}
+    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-waf:${IMAGE_TAG:?Set IMAGE_TAG}
     container_name: incident_waf
     environment:
       ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"
@@ -161,10 +161,13 @@ services:
       - "80:80"
       - "443:443"
     volumes:
+      - ./infra/waf/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
       - /etc/incident-waf/certs:/etc/nginx/tls:ro
       - /var/www/certbot:/var/www/certbot:ro
       - ./infra/waf/grafana-exclusion.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
     depends_on:
+      grafana:
+        condition: service_started
       frontend:
         condition: service_started
       backend:
