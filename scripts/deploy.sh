@@ -35,7 +35,6 @@ cleanup_images() {
 
     # Always retain the current and previous successful releases.
     if [[ "$tag" == "$current" || "$tag" == "$previous" ]]; then
-      log "KEEP protected: $image"
       continue
     fi
 
@@ -49,7 +48,6 @@ cleanup_images() {
 
     # Age is measured from image creation, not download time.
     if ((created_epoch >= cutoff)); then
-      log "KEEP recent: $image"
       continue
     fi
 
@@ -59,7 +57,6 @@ cleanup_images() {
       --filter "ancestor=$image") || continue
 
     if [[ -n "$containers" ]]; then
-      log "KEEP referenced by container: $image"
       continue
     fi
 
