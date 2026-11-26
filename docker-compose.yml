@@ -62,7 +62,11 @@ services:
       - vault_tok_backup:/vault/tokens/backup
       - vault_tok_migrate:/vault/tokens/migrate
     healthcheck:
-      test: ["CMD-SHELL", "test -f /vault/init/.ready && vault status -format=json | jq -e '.sealed == false' >/dev/null"]
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /vault/init/.ready && vault status -format=json | jq -e '.sealed == false' >/dev/null",
+        ]
       interval: 2s
       timeout: 2s
       retries: 60
@@ -75,8 +79,8 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
-      - --storage.tsdb.retention.size=2GB
+      - --storage.tsdb.retention.size=1GB
+      - --storage.tsdb.retention.time=7d
     volumes:
       - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
