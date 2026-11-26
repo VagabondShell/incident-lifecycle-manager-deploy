@@ -5,8 +5,7 @@ umask 077
 exec > >(tee -a /var/log/deploy-incident.log) 2>&1
 
 DEPLOY_DIR="/opt/incident-lifecycle-manager-deploy"
-CLEANUP_DRY_RUN=true
-KEEP_DAYS=15
+CLEANUP_DRY_RUN=flase
 
 log() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -15,15 +14,13 @@ log() {
 cleanup_images() {
   local current="$1"
   local previous="$2"
-  local cutoff images image tag created created_epoch containers
+  local images image tag containers
 
   if [[ ! "$current" =~ ^[0-9a-f]{40}$ ||
     ! "$previous" =~ ^[0-9a-f]{40}$ ]]; then
     log "Skipping cleanup: current or previous SHA is missing/invalid."
     return 0
   fi
-
-  cutoff=$(date -u -d "$KEEP_DAYS days ago" +%s) || return 1
 
   images=$(docker image ls \
     --filter 'reference=sofianvagabond/incident-*:*' \
@@ -40,16 +37,6 @@ cleanup_images() {
 
     # Leave named tags such as latest, v4, and migrations-v1 alone.
     [[ "$tag" =~ ^[0-9a-f]{40}$ ]] || continue
-
-    created=$(docker image inspect \
-      --format '{{.Created}}' "$image") || continue
-
-    created_epoch=$(date -u -d "$created" +%s) || continue
-
-    # Age is measured from image creation, not download time.
-    if ((created_epoch >= cutoff)); then
-      continue
-    fi
 
     # Protect images referenced by running or stopped containers.
     # The ancestor filter also conservatively protects parent images.
@@ -76,7 +63,6 @@ cleanup_images() {
 }
 
 smoke_test() {
-  # Test HTTPS through the local WAF using the real hostname.
   # Retry briefly to allow the application to settle.
   local attempt
 
