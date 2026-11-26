@@ -84,10 +84,9 @@ smoke_test() {
   local attempt
 
   for attempt in 1 2 3; do
-    if curl -fsS --connect-timeout 5 --max-time 10 \
-      --resolve webexp.me:443:127.0.0.1 \
-      https://webexp.me/api/v1/health >/dev/null; then
-      log "API smoke test passed."
+    if python3 "$DEPLOY_DIR/scripts/smoke_test.py" \
+      "https://webexp.me"; then
+      log "Smoke tests passed."
       return 0
     fi
 
