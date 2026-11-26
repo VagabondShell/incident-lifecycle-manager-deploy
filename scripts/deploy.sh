@@ -4,7 +4,7 @@ umask 077
 
 exec > >(tee -a /var/log/deploy-incident.log) 2>&1
 
-DEPLOY_DIR="/home/ubuntu/incident-lifecycle-manager-deploy"
+DEPLOY_DIR="/opt/incident-lifecycle-manager-deploy"
 CLEANUP_DRY_RUN=true
 KEEP_DAYS=15
 
