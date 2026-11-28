@@ -61,7 +61,7 @@ flock -n 9 || {
   exit 1
 }
 
-[[ -f .env && -f current.env ]] || {
+[[ -f .env && -f release/current.env ]] || {
   log ".env and current.env must exist." >&2
   exit 1
 }
@@ -77,7 +77,7 @@ work_dir=$(mktemp -d "$DEPLOY_DIR/.deploy.XXXXXX")
 trap 'rm -rf -- "$work_dir"' EXIT
 
 # Snapshot inputs while holding the deployment lock.
-cp -- current.env "$work_dir/current.env"
+cp -- release/current.env "$work_dir/current.env"
 cp -- "$updates_file" "$work_dir/updates.env"
 
 incoming="$work_dir/incoming.env"
@@ -101,10 +101,10 @@ if compose_for "$incoming" up \
   smoke_test; then
 
   # Preserve rollback history when redeploying identical references.
-  if ! cmp -s "$incoming" current.env; then
+  if ! cmp -s "$incoming" release/current.env; then
     cp -- "$baseline" "$work_dir/previous.env"
-    mv -- "$work_dir/previous.env" previous.env
-    mv -- "$incoming" current.env
+    mv -- "$work_dir/previous.env" release/previous.env
+    mv -- "$incoming" release/current.env
   fi
 
   log "Deployment succeeded; successful image references recorded."
