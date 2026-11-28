@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-postgres:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${POSTGRES_IMAGE:?Set POSTGRES_IMAGE}
     container_name: incident_postgres
     environment:
       VAULT_ADDR: http://vault:8200
@@ -20,7 +20,7 @@ services:
       retries: 20
 
   postgres-backup:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-postgres-backup:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${POSTGRES_BACKUP_IMAGE:?Set POSTGRES_BACKUP_IMAGE}
     profiles: ["extras"]
     container_name: incident_postgres_backup
     restart: always
@@ -38,7 +38,7 @@ services:
         condition: service_healthy
 
   vault:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-vault:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${VAULT_IMAGE:?Set VAULT_IMAGE}
     container_name: incident_vault
     cap_add:
       - IPC_LOCK
@@ -90,7 +90,7 @@ services:
       - incident_network
 
   backend:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-backend:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE}
     environment:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN_FILE: /vault/token/token
@@ -126,7 +126,7 @@ services:
       - incident_network
 
   frontend:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-frontend:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${FRONTEND_IMAGE:?Set FRONTEND_IMAGE}
     container_name: incident_frontend
     depends_on:
       backend:
@@ -135,7 +135,7 @@ services:
       - incident_network
 
   grafana:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-grafana:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${GRAFANA_IMAGE:?Set GRAFANA_IMAGE}
     container_name: grafana
     restart: unless-stopped
     environment:
@@ -157,7 +157,7 @@ services:
       - incident_network
 
   waf:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-waf:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${WAF_IMAGE:?Set WAF_IMAGE}
     container_name: incident_waf
     environment:
       ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"
@@ -186,7 +186,7 @@ services:
       - incident_network
 
   postgres-exporter:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-postgres-exporter:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${POSTGRES_EXPORTER_IMAGE:?Set POSTGRES_EXPORTER_IMAGE}
     environment:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN_FILE: /vault/token/token
@@ -203,7 +203,7 @@ services:
       - incident_network
 
   node_exporter:
-    image: prom/node-exporter:v1.12.1
+    image: ${NODE_EXPORTER_IMAGE:?Set NODE_EXPORTER_IMAGE}
     container_name: node_exporter
     command:
       - "--path.rootfs=/host"
@@ -214,7 +214,7 @@ services:
       - /:/host:ro,rslave
 
   migrate:
-    image: ${DOCKER_USERNAME:?Set DOCKER_USERNAME}/incident-migrate:${IMAGE_TAG:?Set IMAGE_TAG}
+    image: ${MIGRATE_IMAGE:?Set MIGRATE_IMAGE}
     profiles: ["tools"]
     restart: "no"
     environment:
