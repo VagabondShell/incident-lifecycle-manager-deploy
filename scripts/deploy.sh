@@ -5,65 +5,22 @@ umask 077
 exec > >(tee -a /var/log/deploy-incident.log) 2>&1
 
 DEPLOY_DIR="/opt/incident-lifecycle-manager-deploy"
-CLEANUP_DRY_RUN=flase
 
 log() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
 }
 
-cleanup_images() {
-  local current="$1"
-  local previous="$2"
-  local images image tag containers
+compose_for() {
+  local manifest="$1"
+  shift
 
-  if [[ ! "$current" =~ ^[0-9a-f]{40}$ ||
-    ! "$previous" =~ ^[0-9a-f]{40}$ ]]; then
-    log "Skipping cleanup: current or previous SHA is missing/invalid."
-    return 0
-  fi
-
-  images=$(docker image ls \
-    --filter 'reference=sofianvagabond/incident-*:*' \
-    --format '{{.Repository}}:{{.Tag}}') || return 1
-
-  while IFS= read -r image; do
-    [[ -n "$image" ]] || continue
-    tag="${image##*:}"
-
-    # Always retain the current and previous successful releases.
-    if [[ "$tag" == "$current" || "$tag" == "$previous" ]]; then
-      continue
-    fi
-
-    # Leave named tags such as latest, v4, and migrations-v1 alone.
-    [[ "$tag" =~ ^[0-9a-f]{40}$ ]] || continue
-
-    # Protect images referenced by running or stopped containers.
-    # The ancestor filter also conservatively protects parent images.
-    containers=$(docker ps -aq \
-      --filter "ancestor=$image") || continue
-
-    if [[ -n "$containers" ]]; then
-      continue
-    fi
-
-    if [[ "$CLEANUP_DRY_RUN" == "true" ]]; then
-      log "WOULD DELETE: $image"
-    else
-      log "DELETE: $image"
-
-      # Remove the tag without forcing removal.
-      if ! docker image rm "$image"; then
-        log "Could not remove: $image" >&2
-      fi
-    fi
-  done <<<"$images"
-
-  return 0
+  docker compose \
+    --env-file "$DEPLOY_DIR/.env" \
+    --env-file "$manifest" \
+    "$@"
 }
 
 smoke_test() {
-  # Retry briefly to allow the application to settle.
   local attempt
 
   for attempt in 1 2 3; do
@@ -73,7 +30,7 @@ smoke_test() {
       return 0
     fi
 
-    log "API smoke test attempt $attempt failed." >&2
+    log "Smoke test attempt $attempt failed." >&2
 
     if ((attempt < 3)); then
       sleep 5
@@ -83,90 +40,78 @@ smoke_test() {
   return 1
 }
 
-# Validate the requested release.
-if [[ $# -ne 1 || ! ${1:-} =~ ^[0-9a-f]{40}$ ]]; then
-  echo "Usage: deploy-incident <40-character release SHA>" >&2
+if [[ $# -ne 1 ]]; then
+  echo "Usage: deploy.sh /absolute/path/to/updates.env" >&2
   exit 2
 fi
 
-case "$CLEANUP_DRY_RUN" in
-true | false) ;;
-*)
-  echo "CLEANUP_DRY_RUN must be true or false." >&2
-  exit 1
-  ;;
-esac
+# Resolve the supplied path before changing directories.
+updates_file=$(realpath -- "$1")
 
-release_sha="$1"
+if [[ ! -f "$updates_file" || ! -r "$updates_file" ]]; then
+  echo "Updates manifest is missing or unreadable." >&2
+  exit 1
+fi
+
 cd "$DEPLOY_DIR"
 
-# Prevent inherited variables overriding the release stored in .env.
-unset IMAGE_TAG PREVIOUS_IMAGE_TAG
-
-# Keep the lock for both deployment and cleanup.
 exec 9>.deploy.lock
 flock -n 9 || {
   log "A deployment is already running." >&2
   exit 1
 }
 
-if [[ ! -f .env ]]; then
-  log ".env is missing." >&2
+[[ -f .env && -f current.env ]] || {
+  log ".env and current.env must exist." >&2
   exit 1
-fi
+}
 
-if [[ $(grep -c '^IMAGE_TAG=' .env) != 1 ]]; then
-  log "Expected exactly one IMAGE_TAG entry in .env." >&2
-  exit 1
-fi
+# Shell environment variables override Compose env files.
+# Remove inherited image variables so the manifests control selection.
+unset IMAGE_TAG PREVIOUS_IMAGE_TAG
+unset POSTGRES_IMAGE POSTGRES_BACKUP_IMAGE VAULT_IMAGE
+unset PROMETHEUS_IMAGE BACKEND_IMAGE FRONTEND_IMAGE GRAFANA_IMAGE
+unset WAF_IMAGE POSTGRES_EXPORTER_IMAGE NODE_EXPORTER_IMAGE MIGRATE_IMAGE
 
-current_sha=$(sed -n 's/^IMAGE_TAG=//p' .env)
-previous_sha=$(sed -n 's/^PREVIOUS_IMAGE_TAG=//p' .env)
+work_dir=$(mktemp -d "$DEPLOY_DIR/.deploy.XXXXXX")
+trap 'rm -rf -- "$work_dir"' EXIT
 
-if [[ ! "$current_sha" =~ ^[0-9a-f]{40}$ ]]; then
-  log "IMAGE_TAG must be a plain 40-character SHA." >&2
-  exit 1
-fi
+# Snapshot inputs while holding the deployment lock.
+cp -- current.env "$work_dir/current.env"
+cp -- "$updates_file" "$work_dir/updates.env"
 
-# An absent previous SHA is allowed when first adopting this script.
-if [[ -n "$previous_sha" &&
-  ! "$previous_sha" =~ ^[0-9a-f]{40}$ ]]; then
-  log "PREVIOUS_IMAGE_TAG must be one plain 40-character SHA." >&2
-  exit 1
-fi
+incoming="$work_dir/incoming.env"
+baseline="$work_dir/current.env"
 
-next_env=$(mktemp .env.deploy.XXXXXX)
-trap 'rm -f -- "$next_env"' EXIT
+python3 scripts/merge_images.py \
+  "$baseline" "$work_dir/updates.env" >"$incoming"
 
-if [[ "$release_sha" == "$current_sha" ]]; then
-  # Preserve rollback history when redeploying the same release.
-  cp -- .env "$next_env"
-else
-  previous_sha="$current_sha"
+log "Validating candidate release."
+compose_for "$incoming" config --quiet
 
-  sed \
-    -e "s/^IMAGE_TAG=.*/IMAGE_TAG=$release_sha/" \
-    -e '/^PREVIOUS_IMAGE_TAG=/d' \
-    .env >"$next_env"
+# Check Python syntax before making container changes.
+python3 -c \
+  'import ast, pathlib; ast.parse(pathlib.Path("scripts/smoke_test.py").read_text())'
 
-  printf '\nPREVIOUS_IMAGE_TAG=%s\n' "$previous_sha" >>"$next_env"
-fi
+log "Pulling candidate images."
+compose_for "$incoming" pull
 
-log "Deploying $release_sha; existing release is $current_sha."
-
-# Fail before changing containers if validation or pulling fails.
-IMAGE_TAG="$release_sha" docker compose config --quiet
-IMAGE_TAG="$release_sha" docker compose pull
-
-if IMAGE_TAG="$release_sha" docker compose up \
+if compose_for "$incoming" up \
   -d --no-build --wait --wait-timeout 300 &&
-  smoke_test &&
-  mv -- "$next_env" .env; then
-  log "Deployed $release_sha."
-else
-  log "Deployment failed. Restoring $current_sha." >&2
+  smoke_test; then
 
-  if IMAGE_TAG="$current_sha" docker compose up \
+  # Preserve rollback history when redeploying identical references.
+  if ! cmp -s "$incoming" current.env; then
+    cp -- "$baseline" "$work_dir/previous.env"
+    mv -- "$work_dir/previous.env" previous.env
+    mv -- "$incoming" current.env
+  fi
+
+  log "Deployment succeeded; successful image references recorded."
+else
+  log "Deployment failed. Restoring the last successful image list." >&2
+
+  if compose_for "$baseline" up \
     -d --no-build --wait --wait-timeout 300 &&
     smoke_test; then
     log "Rollback passed health and smoke checks."
@@ -177,10 +122,5 @@ else
   exit 1
 fi
 
-# Cleanup runs only after the release is successfully recorded.
-# A cleanup failure does not trigger a rollback.
-if ! cleanup_images "$release_sha" "$previous_sha"; then
-  log "Deployment succeeded, but cleanup failed." >&2
-fi
-
+log "Image cleanup is disabled until manifest-based retention is installed."
 log "Deployment script finished."
